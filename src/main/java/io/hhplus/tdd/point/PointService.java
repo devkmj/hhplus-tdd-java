@@ -19,12 +19,14 @@ public class PointService {
 
     /**
      * 포인트 조회
-     * */
+     */
     public UserPoint getPoint(long userId) {
         return userPointTable.selectById(userId);
     }
 
-
+    /**
+     * 포인트 충전
+     */
     public UserPoint charge(long userId, long amount) {
         if (amount <= 0) {
             throw new IllegalArgumentException("충전 금액은 0보다 커야 합니다");
@@ -47,4 +49,31 @@ public class PointService {
 
         return updated;
     }
+
+    /**
+     * 포인트 사용
+     */
+    public UserPoint use(long userId, long amount) {
+        if (amount <= 0) {
+            throw new IllegalArgumentException("사용 금액은 0보다 커야 합니다");
+        }
+
+        // 1. 현재 포인트 조히
+        UserPoint current = userPointTable.selectById(userId);
+
+        // 2. 포인트 사용
+        long newAmount = current.point() - amount;
+
+        if(newAmount < 0) {
+            throw new IllegalArgumentException("포인트가 부족합니다");
+        }
+
+        UserPoint updated = userPointTable.insertOrUpdate(userId, newAmount);
+
+        // 4. 사용 히스토리 기록
+        pointHistoryTable.insert(userId, amount, TransactionType.USE, System.currentTimeMillis());
+
+        return updated;
+    }
+
 }
