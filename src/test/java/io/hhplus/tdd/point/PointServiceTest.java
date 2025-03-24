@@ -1,5 +1,6 @@
 package io.hhplus.tdd.point;
 
+import io.hhplus.tdd.common.PointErrorMessages;
 import io.hhplus.tdd.database.PointHistoryTable;
 import io.hhplus.tdd.database.UserPointTable;
 import org.junit.jupiter.api.Test;
@@ -8,6 +9,8 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
+
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -48,7 +51,7 @@ public class PointServiceTest {
         // when & then
         assertThatThrownBy(() -> pointService.charge(userId, invalidAmount))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("충전 금액은 0보다 커야 합니다");
+                .hasMessageContaining(PointErrorMessages.AMOUNT_MUST_BE_POSITIVE);
     }
 
     @Test
@@ -81,7 +84,7 @@ public class PointServiceTest {
 
         assertThatThrownBy(() -> pointService.charge(userId, amount))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("최대 보유 포인트를 초과할 수 없습니다.");
+                .hasMessageContaining(PointErrorMessages.MAX_POINT_EXCEEDED);
     }
 
     @Test
@@ -91,7 +94,7 @@ public class PointServiceTest {
 
         assertThatThrownBy(() -> pointService.use(userId, payAmount))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("사용 금액은 0보다 커야 합니다");
+                .hasMessageContaining(PointErrorMessages.USE_AMOUNT_MUST_BE_POSITIVE);
 
     }
 
@@ -105,7 +108,7 @@ public class PointServiceTest {
 
         assertThatThrownBy(() -> pointService.use(userId, amount))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("포인트가 부족합니다");
+                .hasMessageContaining(PointErrorMessages.INSUFFICIENT_POINT);
     }
 
     @Test
@@ -127,5 +130,33 @@ public class PointServiceTest {
         Mockito.verify(pointHistoryTable).insert(
                 eq(userId), eq(amount), eq(TransactionType.USE), anyLong()
         );
+    }
+
+    @Test
+    void 포인트_내역이_없으면_빈_리스트를_반환한다() {
+        long userId = 2L;
+
+        Mockito.when(pointHistoryTable.selectAllByUserId(userId)).thenReturn(List.of());
+
+        List<PointHistory> result = pointService.getHistories(userId);
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    void 포인트_내역이_존재하면_리스트를_반환한다() {
+        long userId = 1L;
+        List<PointHistory> histories = List.of(
+                new PointHistory(1, userId, 1000, TransactionType.CHARGE, System.currentTimeMillis()),
+                new PointHistory(2, userId, 500, TransactionType.USE, System.currentTimeMillis())
+        );
+
+        Mockito.when(pointHistoryTable.selectAllByUserId(userId)).thenReturn(histories);
+
+        List<PointHistory> result = pointService.getHistories(userId);
+
+        assertThat(result).hasSize(2);
+        assertThat(result.get(0).type()).isEqualTo(TransactionType.CHARGE);
+        assertThat(result.get(1).type()).isEqualTo(TransactionType.USE);
     }
 }

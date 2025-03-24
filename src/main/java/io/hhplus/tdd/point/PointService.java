@@ -1,8 +1,11 @@
 package io.hhplus.tdd.point;
 
+import io.hhplus.tdd.common.PointErrorMessages;
 import io.hhplus.tdd.database.PointHistoryTable;
 import io.hhplus.tdd.database.UserPointTable;
 import org.springframework.stereotype.Service;
+
+import java.util.List;
 
 @Service
 public class PointService {
@@ -10,7 +13,7 @@ public class PointService {
     private final UserPointTable userPointTable;
     private final PointHistoryTable pointHistoryTable;
 
-    private static final long MAX_POINT = 100_000L;     // 최대 보유 포인트
+    private static final long MAX_POINT = 100_000L; // 최대 보유 포인트
 
     public PointService(UserPointTable userPointTable, PointHistoryTable pointHistoryTable) {
         this.userPointTable = userPointTable;
@@ -29,23 +32,18 @@ public class PointService {
      */
     public UserPoint charge(long userId, long amount) {
         if (amount <= 0) {
-            throw new IllegalArgumentException("충전 금액은 0보다 커야 합니다");
+            throw new IllegalArgumentException(PointErrorMessages.AMOUNT_MUST_BE_POSITIVE);
         }
-        // 1. 현재 포인트 조히
-        UserPoint current = userPointTable.selectById(userId);
 
-        // 2. 누적 충전
+        UserPoint current = findUserPoint(userId);
         long newAmount = current.point() + amount;
 
         if(newAmount > MAX_POINT) {
-            throw new IllegalArgumentException("최대 보유 포인트를 초과할 수 없습니다.");
+            throw new IllegalArgumentException(PointErrorMessages.MAX_POINT_EXCEEDED);
         }
 
-        // 3. 포인트 테이블 업데이트
         UserPoint updated = userPointTable.insertOrUpdate(userId, newAmount);
-
-        // 4. 충전 히스토리 기록
-        pointHistoryTable.insert(userId, amount, TransactionType.CHARGE, System.currentTimeMillis());
+        pointHistoryTable.insert(userId, amount, TransactionType.CHARGE, now());
 
         return updated;
     }
@@ -55,25 +53,33 @@ public class PointService {
      */
     public UserPoint use(long userId, long amount) {
         if (amount <= 0) {
-            throw new IllegalArgumentException("사용 금액은 0보다 커야 합니다");
+            throw new IllegalArgumentException(PointErrorMessages.USE_AMOUNT_MUST_BE_POSITIVE);
         }
 
-        // 1. 현재 포인트 조히
-        UserPoint current = userPointTable.selectById(userId);
-
-        // 2. 포인트 사용
+        UserPoint current = findUserPoint(userId);
         long newAmount = current.point() - amount;
 
         if(newAmount < 0) {
-            throw new IllegalArgumentException("포인트가 부족합니다");
+            throw new IllegalArgumentException(PointErrorMessages.INSUFFICIENT_POINT);
         }
 
         UserPoint updated = userPointTable.insertOrUpdate(userId, newAmount);
-
-        // 4. 사용 히스토리 기록
-        pointHistoryTable.insert(userId, amount, TransactionType.USE, System.currentTimeMillis());
-
+        pointHistoryTable.insert(userId, amount, TransactionType.USE, now());
         return updated;
     }
 
+    /**
+     * 포인트 내역
+     */
+    public List<PointHistory> getHistories(long userId) {
+        return pointHistoryTable.selectAllByUserId(userId);
+    }
+
+    private UserPoint findUserPoint(long userId) {
+        return userPointTable.selectById(userId);
+    }
+
+    private long now() {
+        return System.currentTimeMillis();
+    }
 }
