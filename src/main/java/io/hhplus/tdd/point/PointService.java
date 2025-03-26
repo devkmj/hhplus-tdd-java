@@ -1,5 +1,6 @@
 package io.hhplus.tdd.point;
 
+import io.hhplus.tdd.common.PointConstants;
 import io.hhplus.tdd.common.PointErrorMessages;
 import io.hhplus.tdd.database.PointHistoryTable;
 import io.hhplus.tdd.database.UserPointTable;
@@ -13,7 +14,6 @@ public class PointService {
     private final UserPointTable userPointTable;
     private final PointHistoryTable pointHistoryTable;
 
-    private static final long MAX_POINT = 100_000L; // 최대 보유 포인트
 
     public PointService(UserPointTable userPointTable, PointHistoryTable pointHistoryTable) {
         this.userPointTable = userPointTable;
@@ -31,15 +31,15 @@ public class PointService {
      * 포인트 충전
      */
     public UserPoint charge(long userId, long amount) {
-        if (amount <= 0) {
-            throw new IllegalArgumentException(PointErrorMessages.AMOUNT_MUST_BE_POSITIVE);
+        if (amount <= PointConstants.MIN_CHARGE_AMOUNT) {
+            throw new IllegalArgumentException(PointErrorMessages.AMOUNT_MUST_BE_POSITIVE.message(PointConstants.MIN_CHARGE_AMOUNT));
         }
 
         UserPoint current = findUserPoint(userId);
         long newAmount = current.point() + amount;
 
-        if(newAmount > MAX_POINT) {
-            throw new IllegalArgumentException(PointErrorMessages.MAX_POINT_EXCEEDED);
+        if(newAmount > PointConstants.MAX_POINT) {
+            throw new IllegalArgumentException(PointErrorMessages.MAX_POINT_EXCEEDED.message(PointConstants.MAX_POINT));
         }
 
         UserPoint updated = userPointTable.insertOrUpdate(userId, newAmount);
@@ -52,15 +52,15 @@ public class PointService {
      * 포인트 사용
      */
     public UserPoint use(long userId, long amount) {
-        if (amount <= 0) {
-            throw new IllegalArgumentException(PointErrorMessages.USE_AMOUNT_MUST_BE_POSITIVE);
+        if (amount <= PointConstants.MIN_USE_AMOUNT) {
+            throw new IllegalArgumentException(PointErrorMessages.USE_AMOUNT_MUST_BE_POSITIVE.message(PointConstants.MIN_USE_AMOUNT));
         }
 
         UserPoint current = findUserPoint(userId);
         long newAmount = current.point() - amount;
 
         if(newAmount < 0) {
-            throw new IllegalArgumentException(PointErrorMessages.INSUFFICIENT_POINT);
+            throw new IllegalArgumentException(PointErrorMessages.INSUFFICIENT_POINT.message(current.point()));
         }
 
         UserPoint updated = userPointTable.insertOrUpdate(userId, newAmount);
