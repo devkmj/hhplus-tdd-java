@@ -12,6 +12,11 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+import static org.hamcrest.Matchers.lessThanOrEqualTo;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -191,5 +196,75 @@ public class PointIntegrationTest {
                 .andExpect(jsonPath("$[1].type").value(TransactionType.USE.toString()))
                 .andExpect(jsonPath("$[1].amount").value(TEST_AMOUNT1));
 
+    }
+
+    @Test
+    void 동시에_여러번_충전해도_최대_포인트를_초과하지_않는다() throws Exception {
+        int threadCount = 10;
+        long requestAmount = 20_000L;
+
+        ExecutorService executorService = Executors.newFixedThreadPool(threadCount);
+        CountDownLatch latch = new CountDownLatch(threadCount);
+        // 동시에 충전 요청
+        for (int i = 0; i < threadCount; i++) {
+            executorService.submit(() -> {
+                try {
+                    mvc.perform(patch("/point/{id}/charge", TEST_USER_ID)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(String.valueOf(requestAmount)));
+                } catch (Exception e) {
+                    System.out.println("충전 실패: " + e.getMessage());
+                } finally {
+                    latch.countDown();
+                }
+            });
+        }
+
+        latch.await(); // 모든 요청 완료까지 대기
+
+        // 최종 포인트가 MAX_POINT 이상 넘지 않는지 확인
+        mvc.perform(get("/point/{id}", TEST_USER_ID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.point").value(lessThanOrEqualTo((int)PointConstants.MAX_POINT)));
+    }
+
+    @Test
+    void 동시에_포인트를_여러_요청이_사용해도_정합성이_보장된다() throws Exception {
+        int threadCount = 10;
+        ExecutorService executorService = Executors.newFixedThreadPool(threadCount);
+        CountDownLatch latch = new CountDownLatch(threadCount);
+
+        long userId = 999L;
+        long chargeAmount = 10000L;
+        long useAmount = 1000L;
+
+        // 1. 먼저 충분한 포인트를 충전
+        mvc.perform(patch("/point/{id}/charge", userId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(String.valueOf(chargeAmount)))
+                .andExpect(status().isOk());
+
+        // 2. 동시에 포인트 사용 요청
+        for (int i = 0; i < threadCount; i++) {
+            executorService.submit(() -> {
+                try {
+                    mvc.perform(patch("/point/{id}/use", userId)
+                                    .contentType(MediaType.APPLICATION_JSON)
+                                    .content(String.valueOf(useAmount)))
+                            .andExpect(status().isOk());
+                } catch (Exception e) {
+                    System.out.println("요청 실패: " + e.getMessage());
+                } finally {
+                    latch.countDown();
+                }
+            });
+        }
+
+        latch.await(); // 모든 스레드 종료 대기
+
+        // 3. 최종 잔액 확인
+        mvc.perform(get("/point/{id}", userId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.point").value(chargeAmount - useAmount * threadCount));
     }
 }

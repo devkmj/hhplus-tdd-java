@@ -6,6 +6,9 @@ import io.hhplus.tdd.database.PointHistoryTable;
 import io.hhplus.tdd.database.UserPointTable;
 import org.springframework.stereotype.Service;
 
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+
 import java.util.List;
 
 @Service
@@ -14,12 +17,16 @@ public class PointService {
     private final UserPointTable userPointTable;
     private final PointHistoryTable pointHistoryTable;
 
+    private final Map<Long, Object> userLocks = new ConcurrentHashMap<>();
 
     public PointService(UserPointTable userPointTable, PointHistoryTable pointHistoryTable) {
         this.userPointTable = userPointTable;
         this.pointHistoryTable = pointHistoryTable;
     }
 
+    public synchronized Object getLockForUser(long userId) {
+        return userLocks.computeIfAbsent(userId, id -> new Object());
+    }
     /**
      * 포인트 조회
      */
@@ -31,41 +38,45 @@ public class PointService {
      * 포인트 충전
      */
     public UserPoint charge(long userId, long amount) {
-        if (amount <= PointConstants.MIN_CHARGE_AMOUNT) {
-            throw new IllegalArgumentException(PointErrorMessages.AMOUNT_MUST_BE_POSITIVE.message(PointConstants.MIN_CHARGE_AMOUNT));
+        synchronized (getLockForUser(userId)) {
+            if (amount <= PointConstants.MIN_CHARGE_AMOUNT) {
+                throw new IllegalArgumentException(PointErrorMessages.AMOUNT_MUST_BE_POSITIVE.message(PointConstants.MIN_CHARGE_AMOUNT));
+            }
+
+            UserPoint current = findUserPoint(userId);
+            long newAmount = current.point() + amount;
+
+            if(newAmount > PointConstants.MAX_POINT) {
+                throw new IllegalArgumentException(PointErrorMessages.MAX_POINT_EXCEEDED.message(PointConstants.MAX_POINT));
+            }
+
+            UserPoint updated = userPointTable.insertOrUpdate(userId, newAmount);
+            pointHistoryTable.insert(userId, amount, TransactionType.CHARGE, now());
+
+            return updated;
         }
-
-        UserPoint current = findUserPoint(userId);
-        long newAmount = current.point() + amount;
-
-        if(newAmount > PointConstants.MAX_POINT) {
-            throw new IllegalArgumentException(PointErrorMessages.MAX_POINT_EXCEEDED.message(PointConstants.MAX_POINT));
-        }
-
-        UserPoint updated = userPointTable.insertOrUpdate(userId, newAmount);
-        pointHistoryTable.insert(userId, amount, TransactionType.CHARGE, now());
-
-        return updated;
     }
 
     /**
      * 포인트 사용
      */
     public UserPoint use(long userId, long amount) {
-        if (amount <= PointConstants.MIN_USE_AMOUNT) {
-            throw new IllegalArgumentException(PointErrorMessages.USE_AMOUNT_MUST_BE_POSITIVE.message(PointConstants.MIN_USE_AMOUNT));
+        synchronized (getLockForUser(userId)) {
+            if (amount <= PointConstants.MIN_USE_AMOUNT) {
+                throw new IllegalArgumentException(PointErrorMessages.USE_AMOUNT_MUST_BE_POSITIVE.message(PointConstants.MIN_USE_AMOUNT));
+            }
+
+            UserPoint current = findUserPoint(userId);
+            long newAmount = current.point() - amount;
+
+            if(newAmount < 0) {
+                throw new IllegalArgumentException(PointErrorMessages.INSUFFICIENT_POINT.message(current.point()));
+            }
+
+            UserPoint updated = userPointTable.insertOrUpdate(userId, newAmount);
+            pointHistoryTable.insert(userId, amount, TransactionType.USE, now());
+            return updated;
         }
-
-        UserPoint current = findUserPoint(userId);
-        long newAmount = current.point() - amount;
-
-        if(newAmount < 0) {
-            throw new IllegalArgumentException(PointErrorMessages.INSUFFICIENT_POINT.message(current.point()));
-        }
-
-        UserPoint updated = userPointTable.insertOrUpdate(userId, newAmount);
-        pointHistoryTable.insert(userId, amount, TransactionType.USE, now());
-        return updated;
     }
 
     /**
